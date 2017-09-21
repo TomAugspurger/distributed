@@ -35,3 +35,8 @@ def _register_keras():
 @partial(register_serialization_lazy, "sparse")
 def _register_sparse():
     from . import sparse
+
+
+@partial(register_serialization_lazy, "pandas")
+def _register_pandsa():
+    from . import pandas  # noqa
