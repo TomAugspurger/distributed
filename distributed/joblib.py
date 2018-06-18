@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import contextlib
+import logging
 
 from distutils.version import LooseVersion
 from uuid import uuid4
@@ -8,11 +9,15 @@ import weakref
 
 from tornado import gen
 
+from .base import tokenize
 from .client import Client, _wait
 from .utils import ignoring, funcname, itemgetter
 from . import get_client, secede, rejoin
 from .worker import thread_state
 from .sizeof import sizeof
+
+
+logger = logging.getLogger(__name__)
 
 # A user could have installed joblib, sklearn, both, or neither. Further, only
 # joblib >= 0.10.0 supports backends, so we also need to check for that. This
@@ -170,12 +175,14 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
         return self.effective_n_jobs(n_jobs)
 
     def start_call(self):
+        logger.info("Starting 'start_call'")
         self.call_data_futures = _WeakKeyDictionary()
 
     def stop_call(self):
         # The explicit call to clear is required to break a cycling reference
         # to the futures.
         self.call_data_futures.clear()
+        logger.info("Finished 'stop_call'")
 
     def effective_n_jobs(self, n_jobs):
         return sum(self.client.ncores().values())
@@ -191,19 +198,24 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
         def maybe_to_futures(args):
             for arg in args:
                 arg_id = id(arg)
+                name = tokenize(arg)
                 if arg_id in itemgetters:
+                    logger.debug("%d in itemgetters", arg_id)
                     yield itemgetters[arg_id]
                     continue
 
                 f = None
                 if f is None and arg_id in self.data_futures:
+                    logger.debug("%d in data_futures", arg_id)
                     f = self.data_futures[arg_id]
 
                 elif f is None and call_data_futures is not None:
                     try:
                         f = call_data_futures[arg]
                     except KeyError:
+                        logger.debug("%d KeyError", arg_id)
                         if is_weakrefable(arg) and sizeof(arg) > 1e6:
+                            logger.info("Auto-scattering %s", name)
                             # Automatically scatter large objects to some of
                             # the workers to avoid duplicated data transfers.
                             # Rely on automated inter-worker data stealing if
@@ -213,6 +225,7 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
                             call_data_futures[arg] = f
 
                 if f is not None:
+                    logger.debug("'f not None' for %d", arg_id)
                     getter = itemgetter(len(collected_futures))
                     collected_futures.append(f)
                     itemgetters[arg_id] = getter
