@@ -9,7 +9,7 @@ import weakref
 
 from tornado import gen
 
-from .base import tokenize
+from dask.base import tokenize
 from .client import Client, _wait
 from .utils import ignoring, funcname, itemgetter
 from . import get_client, secede, rejoin
@@ -199,6 +199,8 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
             for arg in args:
                 arg_id = id(arg)
                 name = tokenize(arg)
+                logger.info("Starting for %d %s", arg_id, name)
+                logger.debug("%s", arg)
                 if arg_id in itemgetters:
                     logger.debug("%d in itemgetters", arg_id)
                     yield itemgetters[arg_id]
@@ -212,6 +214,7 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
                 elif f is None and call_data_futures is not None:
                     try:
                         f = call_data_futures[arg]
+                        logger.debug("%d Found", arg_id)
                     except KeyError:
                         logger.debug("%d KeyError", arg_id)
                         if is_weakrefable(arg) and sizeof(arg) > 1e6:
@@ -223,7 +226,11 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
                             # beyond the initial broadcast arity.
                             [f] = self.client.scatter([arg], broadcast=3)
                             call_data_futures[arg] = f
+                            logger.info("%d futures", len(call_data_futures))
+                        else:
+                            logger.debug("Not autoscattering %s", name)
 
+                logger.info("f %s", f)
                 if f is not None:
                     logger.debug("'f not None' for %d", arg_id)
                     getter = itemgetter(len(collected_futures))
