@@ -3,13 +3,14 @@ import os
 import importlib
 from distutils.version import LooseVersion
 
+import dask.array as da
 import pytest
 from random import random
 from time import sleep
 
 from distributed import Client
 from distributed.metrics import time
-from distributed.utils_test import cluster, inc
+from distributed.utils_test import cluster, inc, gen_cluster
 from distributed.utils_test import loop # noqa F401
 from toolz import identity
 
@@ -265,3 +266,18 @@ def test_auto_scatter(loop, joblib):
             counts = count_events('receive-from-scatter', client)
             assert counts[a['address']] == 0
             assert counts[b['address']] == 0
+
+
+@gen_cluster(client=True)
+def test_joblib_coro(c, s, a, b):
+
+    joblib = pytest.importorskip('joblib')
+    X = da.random.uniform(size=(100, 10), chunks=10)
+
+    def func(x, ind):
+        return x[ind].sum()
+
+    inds = [[0, 10, 20, 30], [0, 10, 20, 30], [50, 75]]
+
+    with joblib.parallel_backend('dask', client=c) as (ba, _):
+        r = yield joblib.Parallel()(joblib.delayed(func)(X, ind) for ind in inds)
