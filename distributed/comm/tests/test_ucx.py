@@ -48,6 +48,9 @@ def test_ucx_specific():
     Test concrete UCX API.
     """
     async def f():
+        def handle_comm(fut):
+            print(fut)
+
         async def handle_comm(comm):
             assert comm.peer_address.startswith('ucx://' + host)
             assert comm.extra_info == {}
@@ -56,7 +59,7 @@ def test_ucx_specific():
             await comm.write(msg)
             await comm.close()
 
-        listener = ucx.UCXListener('ucx://10.33.225.160', handle_comm)
+        listener = ucx.UCXListener(ucx.ADDRESS, handle_comm)
         listener.start()
         host, port = listener.get_host_port()
         assert host == '10.33.225.160'

@@ -23,6 +23,9 @@ import ucp_py as ucp
 logger = logging.getLogger(__name__)
 MAX_MSG_LOG = 23
 PORT = 13337
+IP = '10.33.225.160'
+ADDRESS = f'ucx://{IP}:{PORT}'
+
 ucp.init()
 
 
@@ -107,27 +110,22 @@ class UCX(Comm):
         return ep
 
     async def write(self, msg, serializers=None, on_error="message"):
-        print("UCX.write")
         nbytes = sys.getsizeof(msg)
         ep = self._get_endpoint()
         await ep.send_msg(msg, nbytes)
         return nbytes
 
     async def read(self, deserializers=None):
-        print("UCX.read")
         ep = self._get_endpoint()
-        print('got ep')
         resp = await ep.recv_future()
-        print('got fut')
         obj = ucp.get_obj_from_msg(resp)
-        print('got obj')
-        print(obj)
         return obj
 
     def abort(self):
         pass
 
     async def close(self):
+        # TODO
         pass
 
     def closed(self):
@@ -159,20 +157,18 @@ class UCXConnector(Connector):
 
 
 async def serve_forever(client_ep):
-    print('starting server')
     while True:
         msg = await client_ep.recv_future()
         msg = ucp.get_obj_from_msg(msg)
         if msg == b'':
             break
         else:
-            print("Got: {}".format(msg.decode()))
             client_ep.send_msg(msg, sys.getsizeof(msg))
 
-    print("Shutting down server")
+    # TODO: unclear if this should happen here. Probably
+    # in stop
     ucp.destroy_ep(client_ep)
     ucp.stop_server()
-    print("Server done")
 
 
 class UCXListener(Listener):
@@ -194,7 +190,6 @@ class UCXListener(Listener):
         self.ep = None  # type: TODO
 
     def start(self):
-        print("UCXListeneer.start")
         server = ucp.start_server(self.ucp_handler,
                                   server_port=self.port,
                                   is_coroutine=True)
