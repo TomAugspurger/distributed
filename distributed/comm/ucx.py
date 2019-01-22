@@ -9,6 +9,7 @@ import asyncio
 import logging
 import sys
 import struct
+import threading
 
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener
@@ -103,78 +104,30 @@ class UCX(Comm):
     def _get_endpoint(self):
         logger.debug(f"connecting to {self._host}:{self._port}")
         ep = ucp.get_endpoint(self._host.encode(), self._port)
-        self.ep = ep
         return ep
 
     async def write(self, msg, serializers=None, on_error="message"):
-        logger.debug("UCX.write")
-        stream = self._get_endpoint()
-        frames = await to_frames(
-            msg,
-            serializers=serializers,
-            on_error=on_error,
-            context={"sender": self._local_addr, "recipient": self._peer_addr},
-        )
-        try:
-            # TODO: this is just copy-pasted from TCP. Figure out what
-            # makes sense for UCX
-            lengths = [nbytes(frame) for frame in frames]
-            length_bytes = [struct.pack("Q", len(frames))] + [
-                struct.pack("Q", x) for x in lengths
-            ]
-            if PY3 and sum(lengths) < 2 ** 17:  # 128kiB
-                b = b"".join(length_bytes + frames)  # small enough, send in one go
-                # TODO: check units on the size here...
-                # stream.send_msg(b, sum(lengths))
-                stream.send_msg(b, sys.getsizeof(b))
-            else:
-                raise
-                # stream.write(b''.join(length_bytes))  # avoid large memcpy, send in many
-
-                # for frame in frames:
-                #     # Can't wait for the write() Future as it may be lost
-                #     # ("If write is called again before that Future has resolved,
-                #     #   the previous future will be orphaned and will never resolve")
-                #     if not self._iostream_allows_memoryview:
-                #         frame = ensure_bytes(frame)
-                #     future = stream.write(frame)
-                #     bytes_since_last_yield += nbytes(frame)
-                #     if bytes_since_last_yield > 32e6:
-                #         yield future
-                #         bytes_since_last_yield = 0
-        except Exception as e:
-            # TODO: tighter exception
-            stream = None
-            # convert_stream_closed_error(self, e)
-            raise
-        except TypeError as e:
-            if stream._write_buffer is None:
-                logger.info("tried to write message %s on closed stream", msg)
-            else:
-                raise
-
-        return sum(map(nbytes, frames))
+        print("UCX.write")
+        nbytes = sys.getsizeof(msg)
+        ep = self._get_endpoint()
+        await ep.send_msg(msg, nbytes)
+        return nbytes
 
     async def read(self, deserializers=None):
-        logger.debug("UXC.read")
+        print("UCX.read")
         ep = self._get_endpoint()
         print('got ep')
         resp = await ep.recv_future()
         print('got fut')
-        frames = ucp.get_obj_from_msg(resp)
-        print('got frames')
-        try:
-            msg = await from_frames(frames, deserialize=self.deserialize,
-                                    deserializers=deserializers)
-        except Exception:
-            logger.exception('whoops')
-            raise
-        return msg
+        obj = ucp.get_obj_from_msg(resp)
+        print('got obj')
+        print(obj)
+        return obj
 
     def abort(self):
         pass
 
-    def close(self):
+    async def close(self):
         pass
 
     def closed(self):
@@ -205,32 +158,19 @@ class UCXConnector(Connector):
         return self.comm_class(address, "", "")
 
 
-# TODO: Remove / cleanup connect & serve.
-# This is just trying to figure out how to get them started up.
-msg = b'hi'
+async def serve_forever(client_ep):
+    print('starting server')
+    while True:
+        msg = await client_ep.recv_future()
+        msg = ucp.get_obj_from_msg(msg)
+        if msg == b'':
+            break
+        else:
+            print("Got: {}".format(msg.decode()))
+            client_ep.send_msg(msg, sys.getsizeof(msg))
 
-
-async def connect():
-    print("Connecting")
-    ep = ucp.get_endpoint(b"10.33.225.160", 13337)
-    ep.send_msg(msg, sys.getsizeof(msg))
-
-    resp = await ep.recv_future()
-    r_msg = ucp.get_obj_from_msg(resp)
-    print("Response: ", r_msg.decode())
-    print("Stopping client")
-    ucp.destroy_ep(ep)
-    print("Client done")
-
-
-async def serve(ep):
-    print('Handling')
-    ack = await ep.recv_future()
-    rmsg = ucp.get_obj_from_msg(ack)
-    ep.send_msg(rmsg, sys.getsizeof(rmsg))
-
-    print('Stopping server')
-    ucp.destroy_ep(ep)
+    print("Shutting down server")
+    ucp.destroy_ep(client_ep)
     ucp.stop_server()
     print("Server done")
 
@@ -241,7 +181,7 @@ class UCXListener(Listener):
     encrypted = UCXConnector.encrypted
 
     def __init__(self, address, comm_handler=None, deserialize=False,
-                 ucp_handler=serve):
+                 ucp_handler=serve_forever):
         # XXX: comm_handler is wrong
         # Right now we pass it to ucp.start_server
         # The expectation seems to be a callback
@@ -253,34 +193,18 @@ class UCXListener(Listener):
         # deserialize?
         self.ep = None  # type: TODO
 
-    async def _start(self):
-        client = connect()
+    def start(self):
+        print("UCXListeneer.start")
         server = ucp.start_server(self.ucp_handler,
                                   server_port=self.port,
                                   is_coroutine=True)
-        print('schuduling startup')
-        await asyncio.gather(client, server)
-
-    def start(self):
-        logger.debug("UCXListener.start")
-        ucp.init()  # TODO: thread local for this?
-        loop = asyncio.get_event_loop()
-        # I don't understand this part...
-        # We want the server to continue to run in the background,
-        # ready to accept new connections, right? So we need to
-        # *start* the server, but "run_until_complete" doesn't really
-        # make sense, because this function needs to return as
-        # soon as the server fininhes *starting*, not *serving*.
-        # Does that require another thread for the server? Or am
-        # I missing something?
-        loop.run_until_complete(self._start())
-        # if self.comm_handler:
-            # fut = self.comm_handler(self)
-            # loop.call_soon(fut)
+        loop = asyncio.get_running_loop()
+        loop.create_task(server)
 
     def stop(self):
         if self.ep:
             ucp.destroy_ep(self.ep)
+        # If we take the serve_forever appoach, this would send the stop message.
         # TODO: ?
         # ucp.stop_server()
 
