@@ -113,14 +113,16 @@ class UCX(Comm):
         return obj
 
     def abort(self):
-        pass
+        if self.ep:
+            ucp.destroy_ep(self.ep)
+            self.ep = None
 
     async def close(self):
-        # TODO
-        pass
+        # TODO: Handle in-flight messages?
+        self.abort()
 
     def closed(self):
-        pass
+        return self.ep is None
 
 
 class UCXConnector(Connector):
