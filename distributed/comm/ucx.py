@@ -132,9 +132,6 @@ class UCXConnector(Connector):
 
     async def connect(self, address, deserialize=True, **connection_args):
         logger.debug("UCXConnector.connect")
-        # hmm so distributed.comm.core.connect says "This starts a thread",
-        # "this" presumably torando. Maybe this should be done on a different
-        # thread?
         ip, port = _parse_host_port(address)
         ep = ucp.get_endpoint(ip.encode(), port)
         return self.comm_class(ep, "", "")
@@ -146,7 +143,7 @@ class UCXListener(Listener):
     encrypted = UCXConnector.encrypted
 
     def __init__(self, address, comm_handler=None, deserialize=False,
-                 ucp_handler=None):
+                 ucp_handler=None, **connection_args):
         logger.debug("UCXListener.__init__")
         self.address = address
         self.ip, self.port = _parse_host_port(address)
@@ -155,6 +152,10 @@ class UCXListener(Listener):
         self.deserialize = deserialize
         # deserialize?
         self.ep = None  # type: TODO
+
+        # XXX: The init may be required to take args like
+        # {'require_encryption': None, 'ssl_context': None}
+        self.connection_args = connection_args
 
     def start(self):
 
