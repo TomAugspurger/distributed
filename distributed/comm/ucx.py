@@ -105,51 +105,27 @@ class UCX(Comm):
         frames = await to_frames(msg,
                                  serializers=serializers,
                                  on_error=on_error)  # TODO: context=
+        nframes = struct.pack("Q", len(frames))
+        await self.ep.send_msg(nframes, sys.getsizeof(nframes))  # send number of frames
 
-        msg = b''.join(frames)
-        # nbytes = sys.getsizeof(msg)
-
-        # Do we need any of the `stuck.pack` stuff? Is that just
-        # padding the messages for TCP?
-        # I've included it now for unpacking.
-        lengths = [nbytes(frame) for frame in frames]
-        length_bytes = ([struct.pack('Q', len(frames))] +
-                        [struct.pack('Q', x) for x in lengths])
-        b = b''.join(length_bytes + frames)  # small enough, send in one go
-
-        # TODO: exception handling
-        length_bytes = sys.getsizeof(b)
-        await self.ep.send_msg(b, length_bytes)
-        return length_bytes
+        for frame in frames:
+            await self.ep.send_msg(frame, sys.getsizeof(frame))
 
     async def read(self, deserializers=None):
         # TODO: use recv_msg. May need a size?
         # Looks like TCP sends this as the first 8 bytes in the message.
         resp = await self.ep.recv_future()
         obj = ucp.get_obj_from_msg(resp)
-
-        n_frames = obj[:8]
-        n_frames = struct.unpack('Q', n_frames)[0]
-        lengths = obj[8: 8 + 8 * n_frames]
-        lengths = struct.unpack('Q' * n_frames, lengths)
+        n_frames, = struct.unpack("Q", obj)
 
         frames = []
-        start = 8 + 8 * n_frames
-
-        for i, length in enumerate(lengths):
-            frame = obj[start:start + length]
+        for i in range(n_frames):
+            resp = await self.ep.recv_future()
+            frame = ucp.get_obj_from_msg(resp)
             frames.append(frame)
-            start += length
 
         msg = await from_frames(frames, deserialize=self.deserialize,
                                 deserializers=deserializers)
-        # I'm probably messing something up on the reading or writing,
-        # to get back a tuple here.
-        if isinstance(msg, tuple):
-            assert len(msg) == 1
-            msg, = msg
-        # this may be an artifact of not shutting down properly
-        assert msg is not None
         return msg
 
     def abort(self):
