@@ -47,15 +47,17 @@ def test_ucx_specific():
     """
     Test concrete UCX API.
     """
+    # TODO:
+    # 1. ensure exceptions in handle_comm fail the test
+    # 2. Use dict in read / write, put seralization there.
+    # 3. Test peer_address
+    # 4. Test cleanup
     async def f():
-        def handle_comm(fut):
-            print(fut)
 
         async def handle_comm(comm):
-            assert comm.peer_address.startswith('ucx://' + host)
-            assert comm.extra_info == {}
+            # XXX: failures here don't fail the build yet
             msg = await comm.read()
-            msg['op'] = 'pong'
+            msg = 'Got: {}'.format(msg.decode()).encode()
             await comm.write(msg)
             await comm.close()
 
@@ -71,13 +73,14 @@ def test_ucx_specific():
         async def client_communicate(key, delay=0):
             addr = '%s:%d' % (host, port)
             comm = await connector.connect(addr)
-            # TODO:
+            # TODO: peer_address
             # assert comm.peer_address == 'ucx://' + addr
             assert comm.extra_info == {}
             await comm.write(b'hello from client')
-            # if delay:
-            #     await asyncio.sleep(delay)
-            # msg = await comm.read()
+            if delay:
+                await asyncio.sleep(delay)
+            msg = await comm.read()
+            assert msg == b'Got: hello from client'
             # assert msg == {'op': 'pong', 'data': key}
             l.append(key)
             await comm.close()

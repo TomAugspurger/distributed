@@ -79,19 +79,17 @@ class UCX(Comm):
     """
     def __init__(
         self,
+        ep,
         address: str,
         # reader,  # stream? reader? writer?
         # writer,
-        local_addr: str,
-        peer_addr: str,
         deserialize=True,
     ):
         logger.debug("UCX.__init__")
+        self.ep = ep
         self._host, self._port = _parse_host_port(address)
-        self._local_addr = local_addr
-        self._peer_addr = peer_addr
-        # self.reader = reader
-        # self.writer = writer
+        self._local_addr = None
+        self._peer_addr = None
         self.deserialize = deserialize
 
         # finalizer
@@ -104,20 +102,13 @@ class UCX(Comm):
     def peer_address(self):
         return self._peer_addr
 
-    def _get_endpoint(self):
-        logger.debug(f"connecting to {self._host}:{self._port}")
-        ep = ucp.get_endpoint(self._host.encode(), self._port)
-        return ep
-
     async def write(self, msg, serializers=None, on_error="message"):
         nbytes = sys.getsizeof(msg)
-        ep = self._get_endpoint()
-        await ep.send_msg(msg, nbytes)
+        await self.ep.send_msg(msg, nbytes)
         return nbytes
 
     async def read(self, deserializers=None):
-        ep = self._get_endpoint()
-        resp = await ep.recv_future()
+        resp = await self.ep.recv_future()
         obj = ucp.get_obj_from_msg(resp)
         return obj
 
@@ -145,30 +136,8 @@ class UCXConnector(Connector):
         # "this" presumably torando. Maybe this should be done on a different
         # thread?
         ip, port = _parse_host_port(address)
-        try:
-            # TODO: MAX_BUFFER_SIZE
-            # ep = ucp.get_endpoint(ip.encode(), port)
-            pass
-        except Exception as e:
-            # TODO: cleanup
-            raise e
-        # local_address = self.prefix + get_stream_address(stream)
-        return self.comm_class(address, "", "")
-
-
-async def serve_forever(client_ep):
-    while True:
-        msg = await client_ep.recv_future()
-        msg = ucp.get_obj_from_msg(msg)
-        if msg == b'':
-            break
-        else:
-            client_ep.send_msg(msg, sys.getsizeof(msg))
-
-    # TODO: unclear if this should happen here. Probably
-    # in stop
-    ucp.destroy_ep(client_ep)
-    ucp.stop_server()
+        ep = ucp.get_endpoint(ip.encode(), port)
+        return self.comm_class(ep, "", "")
 
 
 class UCXListener(Listener):
@@ -177,11 +146,9 @@ class UCXListener(Listener):
     encrypted = UCXConnector.encrypted
 
     def __init__(self, address, comm_handler=None, deserialize=False,
-                 ucp_handler=serve_forever):
-        # XXX: comm_handler is wrong
-        # Right now we pass it to ucp.start_server
-        # The expectation seems to be a callback
+                 ucp_handler=None):
         logger.debug("UCXListener.__init__")
+        self.address = address
         self.ip, self.port = _parse_host_port(address)
         self.comm_handler = comm_handler
         self.ucp_handler = ucp_handler
@@ -190,18 +157,27 @@ class UCXListener(Listener):
         self.ep = None  # type: TODO
 
     def start(self):
-        server = ucp.start_server(self.ucp_handler,
+
+        async def serve_forever(client_ep):
+            # Still not sure about this... but maybe enough for now
+            ucx = UCX(client_ep, self.address)
+            if self.comm_handler:
+                await self.comm_handler(ucx)
+
+        server = ucp.start_server(serve_forever,
                                   server_port=self.port,
                                   is_coroutine=True)
-        loop = asyncio.get_running_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
         loop.create_task(server)
 
     def stop(self):
+        # What all should this do?
         if self.ep:
             ucp.destroy_ep(self.ep)
-        # If we take the serve_forever appoach, this would send the stop message.
-        # TODO: ?
-        # ucp.stop_server()
+        ucp.stop_server()  # ?
 
     def get_host_port(self):
         return self.ip, self.port
