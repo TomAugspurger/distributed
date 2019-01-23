@@ -56,8 +56,9 @@ def test_ucx_specific():
 
         async def handle_comm(comm):
             # XXX: failures here don't fail the build yet
-            msg = await comm.read()
-            msg = 'Got: {}'.format(msg.decode()).encode()
+            import pdb; pdb.set_trace()
+            msg = yield comm.read()
+            msg['op'] = 'pong'
             await comm.write(msg)
             await comm.close()
 
@@ -76,12 +77,12 @@ def test_ucx_specific():
             # TODO: peer_address
             # assert comm.peer_address == 'ucx://' + addr
             assert comm.extra_info == {}
-            await comm.write(b'hello from client')
+            msg = {'op': 'ping', 'data': key}
+            await comm.write(msg)
             if delay:
                 await asyncio.sleep(delay)
             msg = await comm.read()
-            assert msg == b'Got: hello from client'
-            # assert msg == {'op': 'pong', 'data': key}
+            assert msg == {'op': 'pong', 'data': key}
             l.append(key)
             await comm.close()
 
