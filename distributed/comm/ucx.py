@@ -112,8 +112,6 @@ class UCX(Comm):
             await self.ep.send_msg(frame, sys.getsizeof(frame))
 
     async def read(self, deserializers=None):
-        # TODO: use recv_msg. May need a size?
-        # Looks like TCP sends this as the first 8 bytes in the message.
         resp = await self.ep.recv_future()
         obj = ucp.get_obj_from_msg(resp)
         n_frames, = struct.unpack("Q", obj)

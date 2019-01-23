@@ -56,8 +56,7 @@ def test_ucx_specific():
 
         async def handle_comm(comm):
             # XXX: failures here don't fail the build yet
-            import pdb; pdb.set_trace()
-            msg = yield comm.read()
+            msg = await comm.read()
             msg['op'] = 'pong'
             await comm.write(msg)
             await comm.close()
