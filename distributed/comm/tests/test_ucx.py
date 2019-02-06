@@ -139,3 +139,26 @@ def test_ucx_specific():
         assert set(l) == {1234} | set(range(N))
 
     asyncio.run(f())
+
+
+# @pytest.mark.asyncio
+# async def test_cuda_serialize():
+#     cupy = pytest.importorskip('cupy')
+#     address = "{}:{}".format(HOST, next(port_counter))
+#     com, serv_com = await get_comm_pair(address)
+
+#     arr = cupy.random.random((100, 10))
+#     msg = {"op": "ping", 'data': arr}
+
+#     await com.write(msg, serializers=['cupy'])
+#     result = await serv_com.read()
+#     assert result == msg
+#     result["op"] = "pong"
+
+#     await serv_com.write(result)
+
+#     result = await com.read()
+#     assert result == {"op": "pong"}
+
+#     await com.close()
+#     await serv_com.close()

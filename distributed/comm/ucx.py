@@ -130,11 +130,18 @@ class UCX(Comm):
         await self.ep.send_obj(nframes, sys.getsizeof(nframes))  # send number of frames
 
         for frame in frames:
-            await self.ep.send_obj(frame, sys.getsizeof(frame))
+            if isinstance(frame, memoryview):
+                # TODO: UCX-PY #27
+                frame = frame.tobytes()
+            size = sys.getsizeof(frame)
+            await self.ep.send_obj(frame, size)
         return sum(map(nbytes, frames))
 
     async def read(self, deserializers=None):
+        dummy = b'0' * 8
         resp = await self.ep.recv_future()
+        # XXX: this breaks things, e.g. test_ucx_specific
+        # resp = await self.ep.recv_obj(dummy, 41)
         obj = ucp.get_obj_from_msg(resp)
         n_frames, = struct.unpack("Q", obj)
 
@@ -204,7 +211,7 @@ class UCXListener(Listener):
         self.connection_args = connection_args
 
     def start(self):
-        async def serve_forever(client_ep):
+        async def serve_forever(client_ep, listener_instance):
             ucx = UCX(client_ep, self.address, deserialize=self.deserialize)
             if self.comm_handler:
                 await self.comm_handler(ucx)
@@ -223,13 +230,13 @@ class UCXListener(Listener):
             loop = asyncio.get_event_loop()
 
         # Does someone need to hold onto this task?
-        loop.create_task(server)
+        loop.create_task(server.coroutine)
 
     def stop(self):
         # What all should this do?
+        # ucp.stop_listener(self.ep)  # do this here?
         if self.ep:
             ucp.destroy_ep(self.ep)
-        ucp.stop_listener()  # do this here?
 
     def get_host_port(self):
         # TODO: TCP raises if this hasn't started yet.
