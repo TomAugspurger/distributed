@@ -100,6 +100,27 @@ class UCX(Comm):
         The address, prefixed with `ucx://` to use.
     deserialize : bool, default True
         Whether to deserialize data in :meth:`distributed.protocol.loads`
+
+    Notes
+    -----
+    The read-write cycle uses the following pattern:
+
+    Each msg is serialized into a number of "data" frames. We prepend these
+    real frames with two additional frames
+
+        1. is_gpu: Boolean indicator for whether the frame should be
+           received into GPU memory. Packed in '?' format. Unpack with
+           ``<n_frames>?`` format.
+        2. frame_size : Unisigned int describing the size of frame (in bytes)
+           to receive. Packed in 'Q' format, so a length-0 frame is equivalent
+           to an unsized frame. Unpacked with ``<n_frames>Q``.
+
+    The expected read cycle is
+
+    1. Read the frame describing number of frames
+    2. Read the frame describing whether each data frame is gpu-bound
+    3. Read the frame describing whether each data frame is sized
+    4. Read all the data frames.
     """
 
     def __init__(self, ep: ucp.ucp_py_ep,
@@ -132,41 +153,40 @@ class UCX(Comm):
         frames = await to_frames(
             msg, serializers=serializers, on_error=on_error
         )  # TODO: context=
+        gpu_frames = b''.join([struct.pack("?", hasattr(frame, '__cuda_array_interface__'))
+                               for frame in frames])
+        size_frames = b''.join([struct.pack("Q", nbytes(frame)) for frame in frames])
+
+        frames = [gpu_frames] + [size_frames] + frames
         nframes = struct.pack("Q", len(frames))
-        await self.ep.send_obj(nframes, sys.getsizeof(nframes))  # send number of frames
+
+        await self.ep.send_obj(nframes)
 
         for frame in frames:
-            if isinstance(frame, memoryview):
-                # TODO: UCX-PY #27
-                frame = frame.tobytes()
-            size = sys.getsizeof(frame)
-            await self.ep.send_obj(frame, size)
+            await self.ep.send_obj(frame)
         return sum(map(nbytes, frames))
 
     async def read(self, deserializers=None):
         resp = await self.ep.recv_future()
-        # XXX: this breaks things, e.g. test_ucx_specific
-        # dummy = b'0' * 8
-        # resp = await self.ep.recv_obj(dummy, 41)
         obj = ucp.get_obj_from_msg(resp)
         n_frames, = struct.unpack("Q", obj)
+        n_data_frames = n_frames - 2
 
-        # Notes:
-        # 1. Eventually, ucp_msg will be our abstraction over GPU vs. CPU
-        #    memory. We won't need to worry about checking for the destination
-        #    here. The message object will have a reference to the region of
-        #    memory. Downstream of us (say from _frames) will deserialize
-        #    appropriately, based on whether it's a GPU or CPU object.
-        # 2. We will still deserialize the header early, to check the *length*
-        #    of the next message. This lets us use the faster `recv_obj` to
-        #    read the next nbytes.
-        _header_start = b'\x83\xa7headers'
+        gpu_frame_msg = await self.ep.recv_future()
+        gpu_frame_msg = gpu_frame_msg.get_obj()
+        is_gpu = struct.unpack("{}?".format(n_data_frames), gpu_frame_msg)
+
+        sized_frame_msg = await self.ep.recv_future()
+        sized_frame_msg = sized_frame_msg.get_obj()
+        sizes = struct.unpack("{}Q".format(n_data_frames), sized_frame_msg)
 
         frames = []
-        msg = {}
 
-        for i in range(n_frames):
-            resp = await self.ep.recv_future()
+        for i, (is_gpu, size) in enumerate(zip(is_gpu, sizes)):
+            if size > 0:
+                resp = await self.ep.recv_obj(size, cuda=is_gpu)
+            else:
+                resp = await self.ep.recv_future()
             frame = ucp.get_obj_from_msg(resp)
             frames.append(frame)
 
@@ -234,6 +254,7 @@ class UCXListener(Listener):
         # XXX: The init may be required to take args like
         # {'require_encryption': None, 'ssl_context': None}
         self.connection_args = connection_args
+        self._task = None
 
     def start(self):
         async def serve_forever(client_ep, listener_instance):
@@ -267,7 +288,7 @@ class UCXListener(Listener):
         if self.ep:
             ucp.destroy_ep(self.ep)
         # if self.listener_instance:
-        #     ucp.stop_listener(self.listener_instance)
+        #   ucp.stop_listener(self.listener_instance)
 
     def get_host_port(self):
         # TODO: TCP raises if this hasn't started yet.
