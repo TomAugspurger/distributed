@@ -1,5 +1,5 @@
 """
-:ref:`UCX`_ based communications for distributed.
+eref:`UCX`_ based communications for distributed.
 
 See :ref:`communcations` for more.
 
@@ -34,6 +34,16 @@ ADDRESS = DEFAULT_ADDRESS
 _PORT_COUNTER = itertools.count(PORT)
 
 _INITIALIZED = False
+
+
+def _get_port(port=0):
+    # https://github.com/Akshay-Venkatesh/ucx-py/issues/44
+    # Hope that we don't get a clash :)
+    import random
+
+    if not port:
+        port = random.randint(13338, 2**16 - 1)
+    return port
 
 
 def _ucp_init():
@@ -132,7 +142,8 @@ class UCX(Comm):
         assert address.startswith("ucx")
         self.address = address
         self.listener_instance = listener_instance
-        default_port = next(_PORT_COUNTER)
+        # default_port = next(_PORT_COUNTER)
+        default_port = _get_port()
         self._host, self._port = _parse_host_port(address, default_port)
         self._local_addr = None
         self.deserialize = deserialize
@@ -244,7 +255,7 @@ class UCXListener(Listener):
         if not address.startswith("ucx"):
             address = "ucx://" + address
         self.address = address
-        self.ip, self.port = _parse_host_port(address, default_port=next(_PORT_COUNTER))
+        self.ip, self.port = _parse_host_port(address, default_port=_get_port())
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.ep = None  # type: ucp.ucp_py_ep
@@ -303,6 +314,10 @@ class UCXListener(Listener):
         host, port = self.get_host_port()
         host = ensure_concrete_host(host)  # TODO: ensure_concrete_host
         return self.prefix + unparse_host_port(host, port)
+
+    @property
+    def bound_address(self):
+        return self.get_host_port()
 
 
 class UCXBackend(Backend):
