@@ -8,11 +8,7 @@ See :ref:`communcations` for more.
 import asyncio
 import itertools
 import logging
-import sys
 import struct
-import msgpack
-
-from dask import config
 
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener
@@ -34,16 +30,6 @@ ADDRESS = DEFAULT_ADDRESS
 _PORT_COUNTER = itertools.count(PORT)
 
 _INITIALIZED = False
-
-
-def _get_port(port=0):
-    # https://github.com/Akshay-Venkatesh/ucx-py/issues/44
-    # Hope that we don't get a clash :)
-    import random
-
-    if not port:
-        port = random.randint(13338, 2**16 - 1)
-    return port
 
 
 def _ucp_init():
@@ -131,6 +117,7 @@ class UCX(Comm):
     3. Read the frame describing whether each data frame is sized
     4. Read all the data frames.
     """
+    prefix = 'ucx://'
 
     def __init__(self, ep: ucp.ucp_py_ep,
                  address: str,
@@ -141,14 +128,17 @@ class UCX(Comm):
         assert address.startswith("ucx")
         self.address = address
         self.listener_instance = listener_instance
-        # default_port = next(_PORT_COUNTER)
-        # default_port = _get_port()
-        default_port = 0
-        self._host, self.port = _parse_host_port(address, default_port)
+        self._host, self._port = _parse_host_port(address)
         self._local_addr = None
         self.deserialize = deserialize
 
         # finalizer?
+
+    @property
+    def port(self):
+        if self._port == 0:
+            return self.listener_instance.port
+        return self._port
 
     @property
     def local_address(self) -> str:
@@ -156,9 +146,7 @@ class UCX(Comm):
 
     @property
     def peer_address(self) -> str:
-        # XXX: This isn't quite for the server (from UCXListener).
-        # We need the port? Or the tag?
-        return self.address
+        return '{}{}:{}'.format(self.prefix, self._host, self.port)
 
     async def write(self, msg: dict, serializers=None, on_error: str = "message"):
         frames = await to_frames(
@@ -231,7 +219,6 @@ class UCXConnector(Connector):
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
         logger.debug("UCXConnector.connect")
         _ucp_init()
-
         ip, port = _parse_host_port(address)
         ep = ucp.get_endpoint(ip.encode(), port)
         return self.comm_class(ep, self.prefix + address,
@@ -255,7 +242,7 @@ class UCXListener(Listener):
         if not address.startswith("ucx"):
             address = "ucx://" + address
         self.address = address
-        self.ip, self.port = _parse_host_port(address, default_port=0)
+        self.ip, self.port = _parse_host_port(address)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.ep = None  # type: ucp.ucp_py_ep

@@ -1,5 +1,4 @@
 import asyncio
-import itertools
 
 import pytest
 import ucp_py as ucp
@@ -13,12 +12,7 @@ from distributed.utils_test import gen_test
 from .test_comms import check_deserialize
 
 
-ADDRESS = ucx.ADDRESS
-HOST, PORT = parse_host_port(ADDRESS.lstrip("ucx://"))
-HOST = 'ucx://' + HOST
-# Currently having some issues with re-using ports.
-# Tests just hang. Still debugging.
-port_counter = itertools.count(PORT)
+HOST = "ucx://{}".format(ucp.get_address())
 
 
 def test_parse_address():
@@ -27,7 +21,7 @@ def test_parse_address():
 
 
 def test_parse_host_port():
-    assert ucx._parse_host_port("10.33.225.160") == ("10.33.225.160", 13337)
+    assert ucx._parse_host_port("10.33.225.160") == ("10.33.225.160", 0)
     assert ucx._parse_host_port("10.33.225.160:13337") == ("10.33.225.160", 13337)
     assert ucx._parse_host_port("10.33.225.160:13338") == ("10.33.225.160", 13338)
 
@@ -59,9 +53,25 @@ async def get_comm_pair(listen_addr, listen_args=None, connect_args=None, **kwar
 
 
 @pytest.mark.asyncio
+async def test_comm_objs():
+    a, b = await get_comm_pair(HOST)
+
+    scheme, loc = parse_address(a.peer_address)
+    host, port = parse_host_port(loc)
+    assert scheme == 'ucx'
+    assert host == HOST[6:]
+    assert port > 0
+
+    scheme, loc = parse_address(b.peer_address)
+    host, port = parse_host_port(loc)
+    assert scheme == 'ucx'
+    assert host == HOST[6:]
+    assert port > 0
+
+
+@pytest.mark.asyncio
 async def test_ping_pong():
-    address = "{}:{}".format(HOST, next(port_counter))
-    com, serv_com = await get_comm_pair(address)
+    com, serv_com = await get_comm_pair(HOST)
     msg = {"op": "ping"}
     await com.write(msg)
     result = await serv_com.read()
@@ -77,18 +87,6 @@ async def test_ping_pong():
     await serv_com.close()
 
 
-@pytest.mark.asyncio
-async def test_comm_objs():
-    address = "{}:{}".format(HOST, next(port_counter))
-    comm, serv_com = await get_comm_pair(address)
-
-    assert comm.peer_address == address
-    scheme, loc = parse_address(comm.peer_address)
-    assert scheme == 'ucx'
-
-    assert comm.peer_address == address
-    scheme, loc = parse_address(serv_com.peer_address)
-    assert scheme == 'ucx'
 
 
 def test_ucx_specific():
@@ -101,8 +99,6 @@ def test_ucx_specific():
     # 3. Test peer_address
     # 4. Test cleanup
     async def f():
-        address = "{}:{}".format(HOST, next(port_counter))
-
         async def handle_comm(comm):
             # XXX: failures here don't fail the build yet
             msg = await comm.read()
@@ -112,7 +108,7 @@ def test_ucx_specific():
             await comm.close()
             assert comm.closed
 
-        listener = ucx.UCXListener(address, handle_comm)
+        listener = ucx.UCXListener(HOST, handle_comm)
         listener.start()
         host, port = listener.get_host_port()
         assert host.count(".") == 3
@@ -156,8 +152,7 @@ async def test_ping_pong_data():
 
     data = np.ones((10, 10))
     # TODO: broken for large arrays
-    address = "{}:{}".format(HOST, next(port_counter))
-    com, serv_com = await get_comm_pair(address)
+    com, serv_com = await get_comm_pair(HOST)
     msg = {"op": "ping", "data": to_serialize(data)}
     await com.write(msg)
     result = await serv_com.read()
@@ -186,8 +181,7 @@ def test_ucx_deserialize():
 ])
 async def test_ping_pong_cupy(shape):
     cupy = pytest.importorskip('cupy')
-    address = "{}:{}".format(HOST, next(port_counter))
-    com, serv_com = await get_comm_pair(address)
+    com, serv_com = await get_comm_pair(HOST)
 
     arr = cupy.random.random(shape)
     msg = {"op": "ping", 'data': to_serialize(arr)}
@@ -208,12 +202,10 @@ async def test_ping_pong_numba():
     numba = pytest.importorskip("numba")
     import numba.cuda
 
-    address = "{}:{}".format(HOST, next(port_counter))
-
     arr = np.arange(10)
     arr = numba.cuda.to_device(arr)
 
-    com, serv_com = await get_comm_pair(address)
+    com, serv_com = await get_comm_pair(HOST)
     msg = {"op": "ping", 'data': to_serialize(arr)}
 
     await com.write(msg)
@@ -227,9 +219,8 @@ async def test_ping_pong_cudf():
     cudf = pytest.importorskip("cudf")
 
     df = cudf.DataFrame({"A": [1, 2, None], "B": [1., 2., None]})
-    address = "{}:{}".format(HOST, next(port_counter))
 
-    com, serv_com = await get_comm_pair(address)
+    com, serv_com = await get_comm_pair(HOST)
     msg = {"op": "ping", 'data': to_serialize(df)}
 
     await com.write(msg)
