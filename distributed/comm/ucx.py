@@ -71,7 +71,7 @@ def _parse_address(addr: str, strict=False) -> tuple:
     return proto, address
 
 
-def _parse_host_port(address: str, default_port=None) -> tuple:
+def _parse_host_port(address: str, default_port=0) -> tuple:
     """
     Parse an endpoint address given in the form "host:port".
 
@@ -81,7 +81,6 @@ def _parse_host_port(address: str, default_port=None) -> tuple:
     if address.startswith("ucx://"):
         _, address = _parse_address(address)
 
-    default_port = default_port or 13337
     return parse_host_port(address, default_port=default_port)
 
 
@@ -143,8 +142,9 @@ class UCX(Comm):
         self.address = address
         self.listener_instance = listener_instance
         # default_port = next(_PORT_COUNTER)
-        default_port = _get_port()
-        self._host, self._port = _parse_host_port(address, default_port)
+        # default_port = _get_port()
+        default_port = 0
+        self._host, self.port = _parse_host_port(address, default_port)
         self._local_addr = None
         self.deserialize = deserialize
 
@@ -255,7 +255,7 @@ class UCXListener(Listener):
         if not address.startswith("ucx"):
             address = "ucx://" + address
         self.address = address
-        self.ip, self.port = _parse_host_port(address, default_port=_get_port())
+        self.ip, self.port = _parse_host_port(address, default_port=0)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.ep = None  # type: ucp.ucp_py_ep
@@ -276,12 +276,13 @@ class UCXListener(Listener):
                 await self.comm_handler(ucx)
 
         _ucp_init()
-        # XXX: the port handling is probably incorrect.
-        # need to figure out if `server_port=None` is
-        # server_port=13337, or server_port="next free port"
+        # We use port=0 to be consistent with distributed. But UCX
+        # uses port=-1 as the "find me a port" port.
+        port = self.port or -1
         server = ucp.start_listener(
-            serve_forever, listener_port=self.port, is_coroutine=True
+            serve_forever, listener_port=port, is_coroutine=True
         )
+        self.port = server.port
 
         try:
             loop = asyncio.get_running_loop()
@@ -317,6 +318,8 @@ class UCXListener(Listener):
 
     @property
     def bound_address(self):
+        # TODO: Does this become part of the base API? Kinda hazy, since
+        # we exclude in for inproc.
         return self.get_host_port()
 
 
