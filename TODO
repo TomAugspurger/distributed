@@ -1,0 +1,47 @@
+My issue tracker
+
+- [  ] Cannot Add, remove, add client
+
+```
+$ dask-scheduler --host=ucx://10.33.225.160:13337
+$ dask-worker ucx://10.33.225.160:13337 --host=ucx://10.33.225.160:13338 --no-nanny
+$ <CTRL-C>
+$ dask-worker ucx://10.33.225.160:13337 --host=ucx://10.33.225.160:13338 --no-nanny
+# in the scheduler console
+distributed.utils - ERROR - Worker already exists ucx://10.33.225.160:13338
+Traceback (most recent call last):
+  File "/home/nfs/an.taugspurger/ucx-dev-env/distributed/distributed/utils.py", line 649, in log_errors
+    yield
+  File "/home/nfs/an.taugspurger/ucx-dev-env/distributed/distributed/scheduler.py", line 1281, in add_worker
+    raise ValueError("Worker already exists %s" % address)
+ValueError: Worker already exists ucx://10.33.225.160:13338
+distributed.core - ERROR - Worker already exists ucx://10.33.225.160:13338
+Traceback (most recent call last):
+  File "/home/nfs/an.taugspurger/ucx-dev-env/distributed/distributed/core.py", line 346, in handle_comm
+    result = yield result
+  File "/home/nfs/an.taugspurger/miniconda3/envs/ucx-dev/lib/python3.7/site-packages/tornado/gen.py", line 1133, in run
+    value = future.result()
+  File "/home/nfs/an.taugspurger/miniconda3/envs/ucx-dev/lib/python3.7/site-packages/tornado/gen.py", line 326, in wrapper
+    yielded = next(result)
+  File "/home/nfs/an.taugspurger/ucx-dev-env/distributed/distributed/scheduler.py", line 1281, in add_worker
+    raise ValueError("Worker already exists %s" % address)
+ValueError: Worker already exists ucx://10.33.225.160:13338
+^Cdistributed.scheduler - INFO - End scheduler at 'ucx://10.33.225.160:13337'
+```
+
+- [x] Nanny isn't working
+    Kinda solved by using random ports. https://github.com/Akshay-Venkatesh/ucx-py/issues/44 for a
+    proper fix.
+
+- [  ] Can't start a LocalCluster
+
+```
+distributed.core - WARNING - No handler register-worker found in Worker
+Traceback (most recent call last):
+  File "/home/nfs/an.taugspurger/ucx-dev-env/distributed/distributed/core.py", line 336, in handle_comm
+      handler = self.handlers[op]
+      KeyError: 'register-worker'
+```
+
+This is strange... The addresses we're using look the same for LocalCluster and `dask-worker`... Not sure
+why the worker is intercepting the message ment for the schduler.
