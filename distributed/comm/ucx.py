@@ -60,15 +60,6 @@ def _parse_host_port(address: str, default_port=0) -> tuple:
     return parse_host_port(address, default_port=default_port)
 
 
-def _unparse_host_port(host, port=None):
-    return unparse_host_port(host, port)
-
-
-def get_endpoint_address(endpoint):
-    # TODO: ucx-py: 18
-    pass
-
-
 # ----------------------------------------------------------------------------
 # Comm Interface
 # ----------------------------------------------------------------------------
@@ -83,6 +74,8 @@ class UCX(Comm):
         The UCP endpoint.
     address : str
         The address, prefixed with `ucx://` to use.
+    listener_instance : Optional[ucp.ListenerFuture]
+        Only provided when created via UCXListener.
     deserialize : bool, default True
         Whether to deserialize data in :meth:`distributed.protocol.loads`
 
@@ -96,7 +89,7 @@ class UCX(Comm):
         1. is_gpu: Boolean indicator for whether the frame should be
            received into GPU memory. Packed in '?' format. Unpack with
            ``<n_frames>?`` format.
-        2. frame_size : Unisigned int describing the size of frame (in bytes)
+        2. frame_size : Unsigned int describing the size of frame (in bytes)
            to receive. Packed in 'Q' format, so a length-0 frame is equivalent
            to an unsized frame. Unpacked with ``<n_frames>Q``.
 
@@ -109,11 +102,12 @@ class UCX(Comm):
     """
     prefix = 'ucx://'
 
-    def __init__(self, ep: ucp.ucp_py_ep,
+    def __init__(self,
+                 ep: ucp.ucp_py_ep,
                  address: str,
                  listener_instance,
                  deserialize=True):
-        logger.info("UCX.__init__ %s %s", address, listener_instance)
+        logger.debug("Creating <UCX %s %s>", address, listener_instance)
         self.ep = ep
         assert address.startswith("ucx")
         self.address = address
@@ -121,8 +115,7 @@ class UCX(Comm):
         self._host, self._port = _parse_host_port(address)
         self._local_addr = None
         self.deserialize = deserialize
-
-        # finalizer?
+        # TODO: finalizer?
 
     @property
     def port(self):
@@ -142,8 +135,10 @@ class UCX(Comm):
         frames = await to_frames(
             msg, serializers=serializers, on_error=on_error
         )  # TODO: context=
-        gpu_frames = b''.join([struct.pack("?", hasattr(frame, '__cuda_array_interface__'))
-                               for frame in frames])
+        gpu_frames = b''.join([
+            struct.pack("?", hasattr(frame, '__cuda_array_interface__'))
+            for frame in frames
+        ])
         size_frames = b''.join([struct.pack("Q", nbytes(frame)) for frame in frames])
 
         frames = [gpu_frames] + [size_frames] + frames
@@ -201,24 +196,20 @@ class UCX(Comm):
 
 class UCXConnector(Connector):
     prefix = "ucx://"
-    comm_class = UCX
     encrypted = False
-
-    client = ...  # TODO: add a client here?
 
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
         logger.debug("UCXConnector.connect")
         _ucp_init()
         ip, port = _parse_host_port(address)
         ep = ucp.get_endpoint(ip.encode(), port)
-        return self.comm_class(ep, self.prefix + address,
-                               listener_instance=None,
-                               deserialize=deserialize)
+        return UCX(ep, self.prefix + address,
+                   listener_instance=None,
+                   deserialize=deserialize)
 
 
 class UCXListener(Listener):
     prefix = UCXConnector.prefix
-    comm_class = UCXConnector.comm_class
     encrypted = UCXConnector.encrypted
 
     def __init__(
@@ -276,8 +267,11 @@ class UCXListener(Listener):
 
         if self.ep:
             ucp.destroy_ep(self.ep)
+
+        # TODO: Clean this up properly. Currnently getting
+        #    asyncio.base_futures.InvalidStateError
         # if self.listener_instance:
-        #   ucp.stop_listener(self.listener_instance)
+        #     ucp.stop_listener(self.listener_instance)
 
     def get_host_port(self):
         # TODO: TCP raises if this hasn't started yet.
@@ -285,7 +279,7 @@ class UCXListener(Listener):
 
     @property
     def listen_address(self):
-        return self.prefix + _unparse_host_port(*self.get_host_port())
+        return self.prefix + unparse_host_port(*self.get_host_port())
 
     @property
     def contact_address(self):
@@ -320,7 +314,7 @@ class UCXBackend(Backend):
 
     def resolve_address(self, loc):
         host, port = parse_host_port(loc)
-        return _unparse_host_port(ensure_ip(host), port)
+        return unparse_host_port(ensure_ip(host), port)
 
     def get_local_address_for(self, loc):
         host, port = parse_host_port(loc)
