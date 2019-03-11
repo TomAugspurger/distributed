@@ -1,12 +1,11 @@
 """
-eref:`UCX`_ based communications for distributed.
+ref:`UCX`_ based communications for distributed.
 
-See :ref:`communcations` for more.
+See :ref:`communications` for more.
 
 .. _UCX: https://github.com/openucx/ucx
 """
 import asyncio
-import itertools
 import logging
 import struct
 
@@ -19,16 +18,6 @@ from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 import ucp_py as ucp
 
 logger = logging.getLogger(__name__)
-MAX_MSG_LOG = 23
-PORT = 13337
-IP = ucp.get_address()
-DEFAULT_ADDRESS = f"ucx://{IP}:{PORT}"
-
-# set in ~/.dask/config.yaml
-# or DASK_DISTRIBUTED__COMM__UCXADDRESS
-ADDRESS = DEFAULT_ADDRESS
-_PORT_COUNTER = itertools.count(PORT)
-
 _INITIALIZED = False
 
 
@@ -36,6 +25,7 @@ def _ucp_init():
     global _INITIALIZED
 
     if not _INITIALIZED:
+        logger.debug("Initializing UCX")
         ucp.init()
         _INITIALIZED = True
 

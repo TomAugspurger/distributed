@@ -1,5 +1,8 @@
 My issue tracker
 
+Open
+----
+
 - [  ] Cannot Add, remove, add client
 
 ```
@@ -29,11 +32,7 @@ ValueError: Worker already exists ucx://10.33.225.160:13338
 ^Cdistributed.scheduler - INFO - End scheduler at 'ucx://10.33.225.160:13337'
 ```
 
-- [x] Nanny isn't working
-    Kinda solved by using random ports. https://github.com/Akshay-Venkatesh/ucx-py/issues/44 for a
-    proper fix.
-
-- [  ] Can't start a LocalCluster
+- [ ] Can't start a LocalCluster
 
 ```
 distributed.core - WARNING - No handler register-worker found in Worker
@@ -43,5 +42,9 @@ Traceback (most recent call last):
       KeyError: 'register-worker'
 ```
 
-This is strange... The addresses we're using look the same for LocalCluster and `dask-worker`... Not sure
-why the worker is intercepting the message ment for the schduler.
+See https://github.com/Akshay-Venkatesh/ucx-py/issues/24#issuecomment-471528934
+
+Fixed
+-----
+
+- [x] Nanny isn't working
