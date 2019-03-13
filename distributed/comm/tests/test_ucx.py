@@ -87,8 +87,6 @@ async def test_ping_pong():
     await serv_com.close()
 
 
-
-
 def test_ucx_specific():
     """
     Test concrete UCX API.
@@ -215,10 +213,15 @@ async def test_ping_pong_numba():
 
 
 @pytest.mark.asyncio
-async def test_ping_pong_cudf():
+@pytest.mark.parametrize("as_series", [True, False])
+async def test_ping_pong_cudf(as_series):
     cudf = pytest.importorskip("cudf")
+    from cudf.tests.utils import assert_eq
+    import distributed.protocol.cudf  # noqa
 
     df = cudf.DataFrame({"A": [1, 2, None], "B": [1., 2., None]})
+    if as_series:
+        df = df['A']
 
     com, serv_com = await get_comm_pair(HOST)
     msg = {"op": "ping", 'data': to_serialize(df)}
@@ -226,4 +229,6 @@ async def test_ping_pong_cudf():
     await com.write(msg)
     result = await serv_com.read()
     data2 = result.pop('data')
+
+    assert_eq(df, data2)
     assert result['op'] == 'ping'
