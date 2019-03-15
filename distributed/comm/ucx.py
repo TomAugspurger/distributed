@@ -158,7 +158,7 @@ class UCX(Comm):
 
         gpu_frame_msg = await self.ep.recv_future()
         gpu_frame_msg = gpu_frame_msg.get_obj()
-        is_gpu = struct.unpack("{}?".format(n_data_frames), gpu_frame_msg)
+        is_gpus = struct.unpack("{}?".format(n_data_frames), gpu_frame_msg)
 
         sized_frame_msg = await self.ep.recv_future()
         sized_frame_msg = sized_frame_msg.get_obj()
@@ -166,7 +166,7 @@ class UCX(Comm):
 
         frames = []
 
-        for i, (is_gpu, size) in enumerate(zip(is_gpu, sizes)):
+        for i, (is_gpu, size) in enumerate(zip(is_gpus, sizes)):
             if size > 0:
                 resp = await self.ep.recv_obj(size, cuda=is_gpu)
             else:
