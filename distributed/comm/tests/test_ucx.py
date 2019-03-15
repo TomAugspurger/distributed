@@ -11,6 +11,19 @@ from distributed.utils_test import gen_test
 
 from .test_comms import check_deserialize
 
+try:
+    import distributed.protocol.cupy   # noqa
+except ImportError:
+    pass
+try:
+    import distributed.protocol.cudf   # noqa
+except ImportError:
+    pass
+try:
+    import distributed.protocol.numba  # noqa
+except ImportError:
+    pass
+
 
 HOST = "ucx://{}".format(ucp.get_address())
 

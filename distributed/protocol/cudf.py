@@ -56,7 +56,7 @@ def serialize_cudf_series(x):
 
 @dask_serialize.register(cudf.DataFrame)
 def serialize_cudf_dataframe(x):
-    sub_headers = []
+    subheaders = []
     arrays = []
     null_masks = []
     null_headers = []
@@ -65,7 +65,7 @@ def serialize_cudf_dataframe(x):
     for label, col in x.iteritems():
         header, [frame] = serialize_numba_ndarray(col.data.mem)
         header['name'] = label
-        sub_headers.append(header)
+        subheaders.append(header)
         arrays.append(frame)
         if col.null_count:
             header, [frame] = serialize_numba_ndarray(col.nullmask.mem)
@@ -77,11 +77,14 @@ def serialize_cudf_dataframe(x):
     arrays.extend(null_masks)
 
     # index_header, index_frames = serialize_cudf_index(x.index)
+    lengths = [subheader['lengths'][0] for subheader in subheaders]
+    lengths.extend([nullheader['lengths'][0]
+                    for nullheader in null_headers])
 
     header = {
-        'lengths': [len(x)] * len(arrays),
+        'lengths': lengths,
         'is_cuda': len(arrays),
-        'subheaders': sub_headers,
+        'subheaders': subheaders,
         'columns': pickle.dumps(x.columns),
         'null_counts': null_counts,
         'null_subheaders': null_headers,

@@ -7,6 +7,7 @@ from cudf.tests.utils import assert_eq
 
 
 @pytest.mark.parametrize("data", [
+    [],
     [1, 2, 3],
     [1, 2, None]
 ])

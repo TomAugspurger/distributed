@@ -59,16 +59,39 @@ def merge_frames(header, frames):
 
     if all(len(f) == l for f, l in zip(frames, lengths)):
         return frames
+    gpu_frames = [x for x in frames if getattr(x, 'is_cuda', False)]
 
     frames = frames[::-1]
     lengths = lengths[::-1]
 
+    if gpu_frames:
+        print('*#*' * 30)
+        out = []
+        import numba
+
+        while lengths:
+            l = lengths.pop()
+            L = numba.cuda.device_array(l, dtype='B')
+            pos = 0
+            frame = frames.pop()
+            size = nbytes(frame)
+            if size and size <= l:
+                l -= size
+                # dtype = frame.__cuda_array_interface__['typestr']
+                arr = numba.cuda.as_cuda_array(frame)
+                L[pos:pos + size] = arr
+                out.append(arr)
+
+        return out
+
     out = []
+    is_cuda = False
     while lengths:
         l = lengths.pop()
         L = []
         while l:
             frame = frames.pop()
+            is_cuda = hasattr(frame, '__cuda_array_interface__')
             if nbytes(frame) <= l:
                 L.append(frame)
                 l -= nbytes(frame)
@@ -77,6 +100,14 @@ def merge_frames(header, frames):
                 L.append(mv[:l])
                 frames.append(mv[l:])
                 l = 0
+        # if is_cuda:
+        #     import cupy
+        #     import numba.cuda
+
+        #     arrs = [cupy.asarray(x) for x in L]
+        #     arr = cupy.hstack(arrs)
+        #     out.append(numba.cuda.as_cuda_array(arr))
+        # else:
         out.append(b''.join(map(ensure_bytes, L)))
     return out
 
