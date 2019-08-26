@@ -1,3 +1,5 @@
+import signal
+
 import pytest
 from click.testing import CliRunner
 
@@ -330,3 +332,34 @@ def test_bokeh_deprecation():
         except ValueError:
             # didn't pass scheduler
             pass
+
+
+def test_exit_code():
+    with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
+        with popen(
+            [
+                "dask-worker",
+                "127.0.0.1:9359",
+                "--host",
+                "127.0.0.1",
+                "--worker-port",
+                "9684",
+                "--nanny-port",
+                "5273",
+                "--no-dashboard",
+            ]
+        ) as worker:
+            with Client("127.0.0.1:9359", loop=loop) as c:
+                start = time()
+                while True:
+                    d = sync(c.loop, c.scheduler.identity)
+                    if d["workers"]:
+                        break
+                    else:
+                        assert time() - start < 5
+                        sleep(0.1)
+
+            worker.send_signal(signal.SIGINT)
+            worker.poll()
+            time.sleep(1)
+        assert worker.returncode == 0

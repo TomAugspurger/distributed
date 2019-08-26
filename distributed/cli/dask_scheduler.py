@@ -220,7 +220,11 @@ def main(
     logger.info("Local Directory: %26s", local_directory)
     logger.info("-" * 47)
 
-    install_signal_handlers(loop, scheduler.close)
+    async def handle_signal(signum):
+        logger.info("Exiting on signal %d", signum)
+        await scheduler.close()
+
+    install_signal_handlers(loop, handle_signal)
 
     async def run():
         await scheduler

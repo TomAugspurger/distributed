@@ -1,3 +1,4 @@
+import asyncio
 import atexit
 import logging
 import multiprocessing
@@ -19,7 +20,7 @@ from distributed.proctitle import (
 )
 
 from toolz import valmap
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.ioloop import IOLoop
 from tornado import gen
 
 logger = logging.getLogger("distributed.dask_worker")
@@ -373,30 +374,22 @@ def main(
         for i in range(nprocs)
     ]
 
-    @gen.coroutine
-    def close_all():
-        # Unregister all workers from scheduler
-        if nanny:
-            yield [n.close(timeout=2) for n in nannies]
-
-    def on_signal(signum):
+    async def close_all(signum):
         logger.info("Exiting on signal %d", signum)
-        close_all()
+        await asyncio.wait([n.close() for n in nannies])
 
     @gen.coroutine
     def run():
         yield nannies
         yield [n.finished() for n in nannies]
 
-    install_signal_handlers(loop, cleanup=on_signal)
+    install_signal_handlers(loop, cleanup=close_all)
 
     try:
         loop.run_sync(run)
-    except TimeoutError:
-        # We already log the exception in nanny / worker. Don't do it again.
-        raise TimeoutError("Timed out starting worker.") from None
-    except KeyboardInterrupt:
-        pass
+    except Exception as e:
+        if not all(n._event_finished.is_set() for n in nannies):
+            logger.exception(e)
     finally:
         logger.info("End worker")
 
