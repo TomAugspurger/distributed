@@ -1,3 +1,5 @@
+import signal
+
 import pytest
 
 pytest.importorskip("requests")
@@ -392,3 +394,13 @@ def test_idle_timeout(loop):
     )
     stop = time()
     assert 1 < stop - start < 10
+
+
+def test_exit_code():
+    with popen(["dask-scheduler", "--no-dashboard"]) as proc:
+        sleep(1)  # TODO:
+        proc.send_signal(signal.SIGINT)
+        proc.poll()
+        sleep(1)  # TODO:
+
+    assert proc.returncode == 0

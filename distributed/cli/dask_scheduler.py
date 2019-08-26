@@ -220,7 +220,7 @@ def main(
     logger.info("Local Directory: %26s", local_directory)
     logger.info("-" * 47)
 
-    install_signal_handlers(loop)
+    install_signal_handlers(loop, scheduler.close)
 
     async def run():
         await scheduler
@@ -228,8 +228,10 @@ def main(
 
     try:
         loop.run_sync(run)
+    except Exception as e:
+        if not scheduler._event_finished.is_set():
+            logger.exception(e)
     finally:
-        scheduler.stop()
         if local_directory_created:
             shutil.rmtree(local_directory)
 
