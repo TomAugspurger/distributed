@@ -209,7 +209,10 @@ def main(
     )
     logger.info("-" * 47)
 
-    install_signal_handlers(loop)
+    async def cleanup(sig):
+        scheduler._event_finished.set()
+
+    install_signal_handlers(loop, cleanup=cleanup)
 
     async def run():
         await scheduler
@@ -219,7 +222,6 @@ def main(
         loop.run_sync(run)
     finally:
         scheduler.stop()
-
         logger.info("End scheduler at %r", scheduler.address)
 
 
